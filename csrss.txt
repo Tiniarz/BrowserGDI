@@ -1,0 +1,129 @@
+const state = {
+    t: 0,
+    stage: 0,
+    audioCtx: null,
+    scriptNode: null,
+    canvas: null,
+    ctx: null,
+    currentGDI: null,
+    params: {}
+};
+
+const audioPayloads = [
+    { r: 16000, f: (t) => ((t|t%255|t%257)+(t&t>>8)+(t*(42&t>>10))+((t%((t>>8|t>>16)+1))^t)) },
+    { r: 8000,  f: (t) => (t*(t>>(t>>13&t))) },
+    { r: 8000,  f: (t) => ((t&((t>>18)+((t>>11)&t)))*t+(((t>>8&t)-(t>>3&t>>8|t>>16))&128)) },
+    { r: 22050, f: (t) => (((t>>12&t>>8)>>(t>>20&t>>12))*t) },
+    { r: 8000,  f: (t) => 10*(t&5*t|t>>6|(t&32768?-6*t/7:(t&65536?-9*t&100:-9*(t&100))/11)) },
+    { r: 22050, f: (t) => t/(t&t>>12) },
+    { r: 44100, f: (t) => t>>t%(t>>12)|(t&t/2&t/4)*t/4000 },
+    { r: 48000, f: (t) => ((Math.sin(t / (t >> 10)) * 128 + 128) ^ (Math.sqrt(t * 5) & t >> 7) ^ (Math.cbrt(t * Math.PI) * (t & 0xFF) >> 4) ^ (Math.random() * (t % 256) > 200 ? 0xFF : 0)) },
+    { r: 11025, f: (t) => { let k=Math.sin(15*Math.sqrt(t%4000))*128+128, l=Math.sin(t*(Math.PI/8)*Math.cbrt((t>>13&3)+1))*64, h=(Math.random()*(t%2000<100?255:0)); return k*0.7+l*0.4+h*0.2; }},
+    { r: 8000,  f: (t) => 10*(t>>7|3*t|t>>(t>>15))+(t>>8&5) },
+    { r: 8000,  f: (t) => (t>>(t>>12)%4)+t*(1+(1+(t>>16)%6)*(t>>10)*(t>>11)%8)^t>>13^t>>6 },
+    { r: 8000,  f: (t) => 9*t&t>>4|5*t&t>>7|(3*t&t>>10)-1 },
+    { r: 8000,  f: (t) => t*(0x21CA52CA>>(t>>9&30)&14)+t*(0xCACACACA>>(t>>9&30)&14)&t>>4 },
+    { r: 22050, f: (t) => (t^t>>12)*t>>8 },
+    { r: 32000, f: (t) => t^t/2^t*t/4000 },
+    { r: 44100, f: (t) => t*(-t>>(t>>13)%8+2&(t>>12)%256)/4+(1048576/(t%65536)&128) },
+    { r: 32000, f: (t) => t*t>>(t/350) },
+    { r: 8000,  f: (t) => t*(t&16384?7:5)*(1+(3&t>>10))>>(3&t>>8)|t>>2 },
+    { r: 8000,  f: (t) => 2*(t>>5&t)-(t>>5)+t*(t>>14&14) },
+    { r: 8000,  f: (t) => t*(t>>9&10|t>>11&24^t>>10&15&t>>15) }
+];
+
+function randomizeGDI() {
+    const modes = ['difference', 'xor', 'exclusion', 'screen', 'hard-light', 'hue'];
+    state.params = {
+        mode: modes[Math.floor(Math.random() * modes.length)],
+        driftX: (Math.random() - 0.5) * 15,
+        driftY: (Math.random() - 0.5) * 15,
+        color: `hsl(${Math.random() * 360}, 100%, 50%)`,
+        style: Math.floor(Math.random() * 4)
+    };
+}
+
+function startStage(idx) {
+    if (state.audioCtx) {
+        state.audioCtx.close();
+    }
+    
+    cancelAnimationFrame(state.currentGDI);
+    randomizeGDI();
+    
+    state.t = 0;
+    const p = audioPayloads[idx];
+    state.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: p.r });
+    state.scriptNode = state.audioCtx.createScriptProcessor(4096, 1, 1);
+    
+    state.scriptNode.onaudioprocess = (e) => {
+        const out = e.outputBuffer.getChannelData(0);
+        for (let i = 0; i < 4096; i++) {
+            out[i] = (p.f(state.t++) & 255) / 128 - 1;
+        }
+    };
+    
+    state.scriptNode.connect(state.audioCtx.destination);
+    console.log(`Switched to Randomized Stage ${idx + 1}`);
+    
+    render();
+}
+
+function render() {
+    const { canvas, ctx, params } = state;
+    
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    
+    ctx.drawImage(canvas, params.driftX, params.driftY);
+    
+    ctx.globalCompositeOperation = params.mode;
+    
+    if (params.style === 0) {
+        ctx.drawImage(canvas, Math.random() * canvas.width, 0, 10, canvas.height, Math.random() * canvas.width, 5, 10, canvas.height);
+    } else if (params.style === 1) {
+        ctx.fillStyle = params.color;
+        ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 100, 100);
+    } else if (params.style === 2) {
+        ctx.strokeStyle = params.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(0, Math.random() * canvas.height, canvas.width, 2);
+    } else {
+        ctx.scale(-1, 1);
+        ctx.drawImage(canvas, -canvas.width, 0);
+    }
+
+    state.currentGDI = requestAnimationFrame(render);
+}
+
+async function init() {
+    state.canvas = document.createElement('canvas');
+    state.ctx = state.canvas.getContext('2d');
+    Object.assign(state.canvas.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1e9, pointerEvents: 'none' });
+    document.body.appendChild(state.canvas);
+    state.canvas.width = window.innerWidth;
+    state.canvas.height = window.innerHeight;
+
+    state.ctx.fillStyle = "white";
+    state.ctx.fillRect(0, 0, state.canvas.width, state.canvas.height);
+    state.ctx.fillStyle = "black";
+    state.ctx.font = "30px Arial";
+    state.ctx.fillText("YOUR BROWSER IS FUCKED", 50, 100);
+
+    startStage(0);
+    
+    setInterval(() => {
+        state.stage = (state.stage + 1) % 20;
+        startStage(state.stage);
+    }, 20000);
+}
+
+function tts() {
+    const u = new SpeechSynthesisUtterance(Math.random().toString(36).substring(7));
+    u.rate = 4; u.pitch = 0.1;
+    u.onend = tts;
+    window.speechSynthesis.speak(u);
+}
+
+init();
+tts();
