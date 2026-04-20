@@ -1,2 +1,2 @@
 # BrowserGDI
-GDI malware inside browsers?!
+GDI inside browsers?!
